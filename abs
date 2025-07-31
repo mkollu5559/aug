@@ -1,3 +1,66 @@
+#!/bin/bash
+
+qMgrName="$1"
+shift
+channels=("$@")  # Remaining arguments = channel names
+
+# Run MQSC and capture output
+runmqsc "$qMgrName" < /tmp/absChlStatus.mqsc > /tmp/absChlStatus.out
+
+get_status() {
+  local channel=$1
+
+  # Check for channel not found
+  if grep -A2 "DIS CHS($channel)" /tmp/absChlStatus.out | grep -q "AMQ8420I"; then
+    echo "$channel:NOT_FOUND"
+    return
+  fi
+
+  local chnl=$(grep "CHANNEL($channel)" /tmp/absChlStatus.out | awk '{print $1}')
+  local sts=$(grep -A1 "CHANNEL($channel)" /tmp/absChlStatus.out | grep STATUS | awk '{print $1}')
+
+  if [[ "$chnl" == "CHANNEL($channel)" && "$sts" == "STATUS(RUNNING)" ]]; then
+    echo "$channel:RUNNING"
+  else
+    echo "$channel:NOT_RUNNING"
+  fi
+}
+
+retVal=""
+failVal=""
+
+for ch in "${channels[@]}"; do
+  status=$(get_status "$ch")
+
+  case "$status" in
+    *:RUNNING)
+      echo "$ch is Running"
+      retVal="${retVal:+$retVal,}$ch"
+      ;;
+    *:NOT_RUNNING)
+      echo "$ch is NOT running"
+      failVal="${failVal:+$failVal,}$ch"
+      ;;
+    *:NOT_FOUND)
+      echo "$ch is NOT found"
+      failVal="${failVal:+$failVal,}$ch"
+      ;;
+    *)
+      echo "$ch status unknown"
+      failVal="${failVal:+$failVal,}$ch"
+      ;;
+  esac
+done
+
+echo "retVal=$retVal"
+echo "failVal=$failVal"
+
+
+
+
+-------------------------------
+
+
 check_abs() {
   passiveQMgr=$1
   instance_id_node1=$2
