@@ -1,0 +1,35 @@
+#!/bin/bash
+yum install -y amazon-cloudwatch-agent
+
+TOKEN=$(curl -X PUT "http://ip/latest/api/token" \
+  -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+
+INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" \
+  -s http://169.254.169.254/latest/meta-data/instance-id)
+
+cat <<EOF > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+{
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/var/mqm/mqsfb/logs/stdout.txt",
+            "log_group_name": "/aws/ibmmq/text",
+            "log_stream_name": "$INSTANCE_ID",
+            "timestamp_format": "%Y-%m-%d %H:%M:%S"
+          }
+        ]
+      }
+    }
+  }
+}
+EOF
+
+sleep 2
+
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+  -a fetch-config \
+  -m ec2 \
+  -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json \
+  -s
