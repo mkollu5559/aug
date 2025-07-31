@@ -1,0 +1,15 @@
+from datetime import datetime, timezone
+
+start_date_data = ticket.get("start_date", "")
+end_date_data = ticket.get("end_date", "")
+
+start_date = datetime.strptime(start_date_data, "%m/%d/%Y %I:%M:%S %p").replace(tzinfo=timezone.utc)
+end_date = datetime.strptime(end_date_data, "%m/%d/%Y %I:%M:%S %p").replace(tzinfo=timezone.utc)
+now = datetime.now(timezone.utc)
+today = now.date()
+
+if start_date.date() <= today <= end_date.date():
+    print(f"✅ Ticket has scheduled for today: {today}")
+else:
+    print(f"❌ Scheduled date does not match today's date for ticket {TICKET_NUMBER}.")
+    sys.exit(1)
