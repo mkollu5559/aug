@@ -1,0 +1,38 @@
+check_abs() {
+  passiveQMgr=$1
+  instance_id_node1=$2
+  channels="$3"
+
+  chk_absChlSts=$(aws ssm send-command \
+    --instance-ids "$instance_id_node1" \
+    --region "$SSM_REGION" \
+    --document-name "AWS-RunShellScript" \
+    --comment "ABS Channel Check" \
+    --parameters 'commands=[
+      "aws s3 cp s3://'"$SSM_SCRIPT_LOC"'/temp/automation/absChlCheck.sh /tmp/absChlCheck.sh",
+      "aws s3 cp s3://'"$SSM_SCRIPT_LOC"'/temp/automation/absChlStatus.mqsc /tmp/absChlStatus.mqsc",
+      "chmod +x /tmp/absChlCheck.sh",
+      "su - mqm -c \"/tmp/absChlCheck.sh '"$passiveQMgr"' '"$channels"'\""
+    ]' \
+    --output text --query "Command.CommandId")
+
+  ssm_cmd_status=$(ssm_wait "$chk_absChlSts" "$SSM_REGION")
+
+  absChlOutput=$(aws ssm get-command-invocation \
+    --command-id "$chk_absChlSts" \
+    --instance-id "$instance_id_node1" \
+    --region "$SSM_REGION" \
+    --query "StandardOutputContent" \
+    --output text)
+
+  retVal=$(echo "$absChlOutput" | grep "retVal=" | cut -d '=' -f2-)
+  failVal=$(echo "$absChlOutput" | grep "failVal=" | cut -d '=' -f2-)
+
+  if [[ -z "$failVal" ]]; then
+    echo "$passiveQMgr","$instance_id_node1","$chk_absChlSts","$ssm_cmd_status","$retVal"
+  else
+    echo "❌ Failed channels: $failVal"
+    echo "$passiveQMgr","$instance_id_node1","$chk_absChlSts","$ssm_cmd_status","$failVal"
+    exit 1
+  fi
+}
