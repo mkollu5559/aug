@@ -11,5 +11,8 @@ today = now.date()
 if start_date.date() <= today <= end_date.date():
     print(f"✅ Ticket has scheduled for today: {today}")
 else:
-    print(f"❌ Scheduled date does not match today's date for ticket {TICKET_NUMBER}.")
+    print(
+        f"❌ Scheduled date does not match today's date for ticket {TICKET_NUMBER}. "
+        f"(Scheduled from {start_date.date()} to {end_date.date()}, today is {today})"
+    )
     sys.exit(1)
