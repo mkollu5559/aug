@@ -1,0 +1,116 @@
+# EC2 Rehydration - SalesforceBridge Infra
+
+This Terraform setup automates EC2 rehydration by launching new EC2 instances with updated AMIs, pulling rehydration scripts from S3, and executing them using SSM.
+
+---
+
+## Folder Structure (Only What You Provided)
+
+```
+terraform/
+├── environments/
+│   └── <env>/                      # e.g., awg-n-nit-intefm/
+│       └── *.tfvars               # AMI values per environment
+├── modules/
+│   ├── ec2/
+│   │   └── main.tf
+│   ├── s3/
+│   │   └── main.tf
+│   └── ssm/
+│       └── main.tf
+├── main.tf                        # Calls all modules per region/env
+├── provider.tf
+├── vars.tf
+├── backend.tf
+```
+
+---
+
+## What You Need To Do for Rehydration
+
+### 1. Identify Which Node to Rehydrate
+
+Nodes you can rehydrate:
+- east-dev
+- east-qa
+- west-qa
+- west-test
+
+NOTE: Rehydrate only one node at a time. Multiple at once is technically allowed, but not recommended.
+
+### 2. Update the AMI in `.tfvars`
+
+Path: `terraform/environments/<env>/<env>.tfvars`
+
+Example:
+```hcl
+ami_name_east_dev  = "OLD-AMI"
+ami_name_east_qa   = "OLD-AMI"
+ami_name_west_test = "OLD-AMI"
+ami_name_west_qa   = "OLD-AMI"
+```
+
+Update only one AMI value per run.
+
+---
+
+## Manual Backup Requirement Before Rehydration
+
+Before starting rehydration, manually back up the EC2 by uploading the following tarballs to S3:
+
+- `s3/mq/s/env/test.tar.gz`
+- `s3/mq/s/env/test2.tar.gz`
+- `s3/mq/s/env/test3.tar.gz`
+
+---
+
+## What Happens After
+
+1. **S3 Module**
+   - Uploads `rehyderation.sh` from: `modules/s3/scripts/`
+   - To: `s3://<bucket>/MQ/SalesforceBridge/`
+
+2. **EC2 Module**
+   - Launches a new EC2 instance using the updated AMI.
+
+3. **SSM Module**
+   - Pulls `rehyderation.sh` from S3 to EC2.
+   - Executes it via `aws_ssm_association` with parameters: env, hostname, bucket.
+
+---
+
+## How `main.tf` Works
+
+The root `main.tf` includes module calls for each environment and region, such as:
+
+```hcl
+module "east_dev_ec2" {
+  source     = "./modules/ec2"
+  ami_name   = var.ami_name_east_dev
+  ...
+}
+
+module "east_dev_s3" {
+  source   = "./modules/s3"
+  ...
+}
+
+module "east_dev_ssm" {
+  source   = "./modules/ssm"
+  ...
+}
+```
+
+This is repeated for:
+- `east_qa`
+- `west_test`
+- `west_qa`
+
+---
+
+## Important Notes
+
+- Only update one AMI at a time.
+- Do not run Terraform manually.
+- Pipeline is triggered automatically when `.tfvars` changes.
+- Infra team does not manage AMIs — only automation.
