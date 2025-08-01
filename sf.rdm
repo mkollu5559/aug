@@ -1,116 +1,85 @@
-# EC2 Rehydration - SalesforceBridge Infra
+# IR360 Proxy Terraform Rehydration Pipeline
 
-This Terraform setup automates EC2 rehydration by launching new EC2 instances with updated AMIs, pulling rehydration scripts from S3, and executing them using SSM.
+## Overview
+This Terraform setup provisions IR360 proxy nodes (EC2 instances) in both `us-gov-west-1` and `us-gov-east-1` regions, one per subnet, using AMI IDs defined in `.tfvars`. Each node is registered via SSM and runs a proxy installation script.
 
----
-
-## Folder Structure (Only What You Provided)
-
+## Directory Structure
 ```
 terraform/
+├── backend.tf
+├── main.tf
+├── output.tf
+├── provider.tf
+├── variables.tf
 ├── environments/
-│   └── <env>/                      # e.g., awg-n-nit-intefm/
-│       └── *.tfvars               # AMI values per environment
+│   └── <env>/
+│       ├── <env>.tfvars
+│       └── backend.tfvars
 ├── modules/
 │   ├── ec2/
-│   │   └── main.tf
-│   ├── s3/
-│   │   └── main.tf
+│   │   ├── main.tf
+│   │   └── install_proxy.sh
 │   └── ssm/
-│       └── main.tf
-├── main.tf                        # Calls all modules per region/env
-├── provider.tf
-├── vars.tf
-├── backend.tf
 ```
 
----
+> ✅ Only `ec2` and `ssm` modules are used. Others are ignored.
 
-## What You Need To Do for Rehydration
+## How Rehydration Works
 
-### 1. Identify Which Node to Rehydrate
+### 1. Environment Setup
+Each environment (e.g., `awg-n-nit-intefm`) has its own `.tfvars` and `backend.tfvars`.
 
-Nodes you can rehydrate:
-- east-dev
-- east-qa
-- west-qa
-- west-test
+Example:
+```hcl
+ami_name_node1_west = "frs-golden-rhel8_2025-06"
+ami_name_node2_west = "frs-golden-rhel8_2025-06"
+ami_name_node1_east = "frs-golden-rhel8_2025-06"
+ami_name_node2_east = "frs-golden-rhel8_2025-06"
+```
 
-NOTE: Rehydrate only one node at a time. Multiple at once is technically allowed, but not recommended.
+Other values like tags, subnets, and SGs are also defined per region.
 
-### 2. Update the AMI in `.tfvars`
+### 2. EC2 Instances
+- 4 EC2 nodes are created:
+  - `ec2_node1_west`, `ec2_node2_west`
+  - `ec2_node1_east`, `ec2_node2_east`
+- Named using format:  
+  `IR360-Proxy-HRCE-${environment_tag_name}-<region>-<node_number>`
 
+### 3. SSM Association
+Each EC2 node is paired with an SSM association to execute the install script.
+
+## Rehydration Instructions
+
+### ✅ What to Change
+Update **only one AMI value** at a time in your `.tfvars`.
+
+### ✅ Where to Update
 Path: `terraform/environments/<env>/<env>.tfvars`
 
 Example:
 ```hcl
-ami_name_east_dev  = "OLD-AMI"
-ami_name_east_qa   = "OLD-AMI"
-ami_name_west_test = "OLD-AMI"
-ami_name_west_qa   = "OLD-AMI"
+ami_name_node1_west = "frs-golden-rhel8_2025-07"
 ```
 
-Update only one AMI value per run.
+### 🔁 Strategy
+- ✅ One node at a time per env (recommended)
+- Optional: both `node1_west` and `node1_east` at once
+- ❌ Do NOT update all 4 at once — availability risk
 
----
+## Proxy Install Script
 
-## Manual Backup Requirement Before Rehydration
+- Path: `modules/ec2/install_proxy.sh`
+- Auto-uploaded to S3: `s3://<bucket>/ir360/proxy/install_proxy.sh`
+- Downloads:  
+  `s3://<bucket>/ir360/proxy/ir360_proxy_v7024_SP5_v2.tar.gz`
 
-Before starting rehydration, manually back up the EC2 by uploading the following tarballs to S3:
+⚠️ New `.tar.gz` proxy versions must go in the same S3 path or the old one will be reused.
 
-- `s3/mq/s/env/test.tar.gz`
-- `s3/mq/s/env/test2.tar.gz`
-- `s3/mq/s/env/test3.tar.gz`
+## Pipeline Behavior
 
----
-
-## What Happens After
-
-1. **S3 Module**
-   - Uploads `rehyderation.sh` from: `modules/s3/scripts/`
-   - To: `s3://<bucket>/MQ/SalesforceBridge/`
-
-2. **EC2 Module**
-   - Launches a new EC2 instance using the updated AMI.
-
-3. **SSM Module**
-   - Pulls `rehyderation.sh` from S3 to EC2.
-   - Executes it via `aws_ssm_association` with parameters: env, hostname, bucket.
-
----
-
-## How `main.tf` Works
-
-The root `main.tf` includes module calls for each environment and region, such as:
-
-```hcl
-module "east_dev_ec2" {
-  source     = "./modules/ec2"
-  ami_name   = var.ami_name_east_dev
-  ...
-}
-
-module "east_dev_s3" {
-  source   = "./modules/s3"
-  ...
-}
-
-module "east_dev_ssm" {
-  source   = "./modules/ssm"
-  ...
-}
-```
-
-This is repeated for:
-- `east_qa`
-- `west_test`
-- `west_qa`
-
----
-
-## Important Notes
-
-- Only update one AMI at a time.
-- Do not run Terraform manually.
-- Pipeline is triggered automatically when `.tfvars` changes.
-- Infra team does not manage AMIs — only automation.
+- No manual Terraform run is needed.
+- On commit to `main`, pipeline:
+  1. Applies new AMI to selected node(s)
+  2. Triggers SSM association
+  3. Runs proxy install script
